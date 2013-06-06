@@ -290,7 +290,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirect;
 class Application extends Container implements HttpKernelInterface, ResponsePreparerInterface
 {
-    const VERSION = '4.0.1';
+    const VERSION = '4.0.3';
     protected $booted = false;
     protected $bootingCallbacks = array();
     protected $bootedCallbacks = array();
@@ -552,6 +552,10 @@ class Application extends Container implements HttpKernelInterface, ResponsePrep
     public function error(Closure $callback)
     {
         $this['exception']->error($callback);
+    }
+    public function pushError(Closure $callback)
+    {
+        $this['exception']->pushError($callback);
     }
     public function fatal(Closure $callback)
     {
@@ -3062,7 +3066,7 @@ abstract class ServiceProvider
     }
     protected function getClassChain(ReflectionClass $reflect)
     {
-        $lastName = null;
+        $classes = array();
         while ($reflect !== false) {
             $classes[] = $reflect;
             $reflect = $reflect->getParentClass();
@@ -3148,9 +3152,9 @@ class ExceptionServiceProvider extends ServiceProvider
     protected function registerWhoopsHandler()
     {
         if ($this->shouldReturnJson()) {
-            $this->app['whoops.handler'] = function () {
+            $this->app['whoops.handler'] = $this->app->share(function () {
                 return new JsonResponseHandler();
-            };
+            });
         } else {
             $this->registerPrettyWhoopsHandler();
         }
@@ -3163,13 +3167,13 @@ class ExceptionServiceProvider extends ServiceProvider
     protected function registerPrettyWhoopsHandler()
     {
         $me = $this;
-        $this->app['whoops.handler'] = function () use($me) {
+        $this->app['whoops.handler'] = $this->app->share(function () use($me) {
             with($handler = new PrettyPageHandler())->setEditor('sublime');
             if (!is_null($path = $me->resourcePath())) {
                 $handler->setResourcesPath($path);
             }
             return $handler;
-        };
+        });
     }
     public function resourcePath()
     {
@@ -4281,7 +4285,7 @@ class SessionServiceProvider extends ServiceProvider
     {
         $config = $this->app['config']['session'];
         $expire = $this->getExpireTime($config);
-        setcookie($config['cookie'], session_id(), $expire, $config['path'], $config['domain']);
+        setcookie($config['cookie'], session_id(), $expire, $config['path'], $config['domain'], false, true);
     }
     protected function getExpireTime($config)
     {
@@ -5886,11 +5890,11 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
         if (static::$unguarded) {
             return true;
         }
-        if (in_array($key, $this->fillable)) {
-            return true;
-        }
         if ($this->isGuarded($key)) {
             return false;
+        }
+        if (in_array($key, $this->fillable)) {
+            return true;
         }
         return empty($this->fillable) and !starts_with($key, '_');
     }
@@ -5947,10 +5951,11 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
     }
     protected function getAccessibleAttributes()
     {
+        $attributes = array_merge(array_fill_keys($this->getMutatedAttributes(), null), $this->attributes);
         if (count($this->visible) > 0) {
-            return array_intersect_key($this->attributes, array_flip($this->visible));
+            return array_intersect_key($attributes, array_flip($this->visible));
         }
-        return array_diff_key($this->attributes, array_flip($this->hidden));
+        return array_diff_key($attributes, array_flip($this->hidden));
     }
     public function relationsToArray()
     {
@@ -7514,6 +7519,10 @@ class Handler
     {
         array_unshift($this->handlers, $callback);
     }
+    public function pushError(Closure $callback)
+    {
+        $this->handlers[] = $callback;
+    }
     protected function prepareResponse($response)
     {
         return $this->responsePreparer->prepareResponse($response);
@@ -8357,7 +8366,7 @@ class MessageBag implements ArrayableInterface, Countable, JsonableInterface, Me
     }
     public function first($key = null, $format = null)
     {
-        $messages = $this->get($key, $format);
+        $messages = is_null($key) ? $this->all($format) : $this->get($key, $format);
         return count($messages) > 0 ? $messages[0] : '';
     }
     public function get($key, $format = null)
