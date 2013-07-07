@@ -1,4 +1,4 @@
-ravel Preloaded (with vendor files)
+## Laravel Preloaded (with vendor files)
 
 Click the zip button above, unzip in your folder and chmod everything in app/storage to 777
 
